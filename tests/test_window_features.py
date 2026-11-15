@@ -37,4 +37,28 @@ assert features["template_3"].tolist() == [0, 0]
 # No missing values are allowed.
 assert not features.isna().any().any()
 
+
+# Test empty time windows.
+gap_logs = pd.DataFrame({
+    "timestamp": [
+        "2026-11-15 10:00:00",
+        "2026-11-15 10:15:00",
+    ],
+    "template_id": [1, 2],
+})
+
+gap_features = build_window_features(
+    gap_logs,
+    window_size="5min",
+    template_ids=[1, 2],
+)
+
+print("\nEmpty-window test:")
+print(gap_features.to_string())
+
+assert len(gap_features) == 4
+assert gap_features["template_1"].tolist() == [1, 0, 0, 0]
+assert gap_features["template_2"].tolist() == [0, 0, 0, 1]
+
+print("\nAll empty-window checks passed!")
 print("\nAll time-window feature checks passed!")

@@ -40,6 +40,15 @@ def build_window_features(
 
     # Keep a consistent feature set across datasets.
     counts = counts.reindex(columns=template_ids, fill_value=0)
+    
+    # Include time windows with no log events.
+    all_windows = pd.date_range(
+        start=data["timestamp"].min().floor(window_size),
+        end=data["timestamp"].max().floor(window_size),
+        freq=window_size,
+    )
+    counts = counts.reindex(index=all_windows, fill_value=0)
+    counts.index.name = "timestamp"
     counts.columns = [f"template_{tid}" for tid in counts.columns]
 
     return counts.sort_index()
