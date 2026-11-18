@@ -2,7 +2,10 @@
 import pandas as pd
 
 from loglens.ingest.parser import parse_log_file
-from loglens.parsing.template_miner import mine_log_templates
+from loglens.parsing.template_miner import (
+    fit_template_miner,
+    transform_log_templates,
+)
 from loglens.features.window_features import build_window_features
 
 from loglens.models.isolation_forest import (
@@ -14,6 +17,7 @@ from loglens.models.local_outlier_factor import (
     train_lof,
     predict_lof,
 )
+
 
 def load_and_parse_logs(file_path: str) -> pd.DataFrame:
     """Load a server log file and return valid parsed records."""
@@ -54,7 +58,10 @@ def split_logs_by_time(
         raise ValueError("At least two time windows are required.")
 
     split_index = int(len(unique_windows) * train_ratio)
-    split_index = max(1, min(split_index, len(unique_windows) - 1))
+    split_index = max(
+        1,
+        min(split_index, len(unique_windows) - 1),
+    )
 
     cutoff = unique_windows.iloc[split_index]
 
@@ -62,3 +69,87 @@ def split_logs_by_time(
     test_logs = sorted_logs[window_ids >= cutoff].copy()
 
     return train_logs, test_logs
+
+
+def run_pipeline(file_path: str) -> dict:
+    """Run the LogLens anomaly detection pipeline."""
+
+    # Step 1: Load and chronologically split the logs.
+    logs = load_and_parse_logs(file_path)
+
+    train_logs, test_logs = split_logs_by_time(
+        logs,
+        train_ratio=0.8,
+        window_size="5min",
+    )
+
+    # Step 2: Learn templates from training data only.
+    miner = fit_template_miner(train_logs)
+
+    train_logs = transform_log_templates(train_logs, miner)
+    test_logs = transform_log_templates(test_logs, miner)
+
+    # Step 3: Build consistent training and testing features.
+    template_ids = sorted(
+        cluster.cluster_id
+        for cluster in miner.drain.clusters
+    )
+
+    if not template_ids:
+        raise ValueError("No log templates were learned.")
+
+    train_features = build_window_features(
+        train_logs,
+        window_size="5min",
+        template_ids=template_ids,
+    )
+
+    test_features = build_window_features(
+        test_logs,
+        window_size="5min",
+        template_ids=template_ids,
+    )
+
+    if train_features.empty or test_features.empty:
+        raise ValueError("Training or testing features are empty.")
+
+    # Step 4: Ensure enough training windows for both models.
+    if len(train_features) < 3:
+        raise ValueError(
+            "At least three training windows are required for LOF."
+        )
+
+    # Step 5: Train and predict with Isolation Forest.
+    isolation_model = train_isolation_forest(
+        train_features,
+        contamination=0.05,
+        random_state=42,
+    )
+
+    isolation_results = predict_anomalies(
+        isolation_model,
+        test_features,
+    )
+
+    # Step 6: Train and predict with LOF.
+    lof_model, lof_scaler = train_lof(
+        train_features,
+        n_neighbors=20,
+        contamination=0.05,
+    )
+
+    lof_results = predict_lof(
+        lof_model,
+        lof_scaler,
+        test_features,
+    )
+
+    # Step 7: Return data and anomaly detection results.
+    return {
+        "train_logs": train_logs,
+        "test_logs": test_logs,
+        "train_features": train_features,
+        "test_features": test_features,
+        "isolation_results": isolation_results,
+        "lof_results": lof_results,
+    }
