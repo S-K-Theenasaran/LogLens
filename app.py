@@ -58,10 +58,52 @@ if uploaded_file is not None:
             )
 
             st.subheader("Isolation Forest Results")
-            st.dataframe(isolation_results, use_container_width=True)
+            st.dataframe(
+                isolation_results,
+                use_container_width=True,
+            )
 
             st.subheader("Local Outlier Factor Results")
-            st.dataframe(lof_results, use_container_width=True)
+            st.dataframe(
+                lof_results,
+                use_container_width=True,
+            )
+
+           
+
+            st.subheader("Detected Incidents")
+
+            st.write("Isolation Forest Incidents")
+            st.dataframe(
+                results["isolation_incidents"],
+                use_container_width=True,
+            )
+
+            st.write("Local Outlier Factor Incidents")
+            st.dataframe(
+                results["lof_incidents"],
+                use_container_width=True,
+            )
+
+            st.subheader("Anomaly Explanations")
+
+            st.write("Isolation Forest Explanations")
+            st.dataframe(
+                results["isolation_explanations"],
+                use_container_width=True,
+            )
+
+            st.write("Local Outlier Factor Explanations")
+            st.dataframe(
+                results["lof_explanations"],
+                use_container_width=True,
+            )
+
+            st.caption(
+                "Explanations show differences from training averages, "
+                "not the exact causes of model predictions."
+            )
+            
 
             st.subheader("Anomaly Score Comparison")
 

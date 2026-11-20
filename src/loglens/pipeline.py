@@ -17,7 +17,8 @@ from loglens.models.local_outlier_factor import (
     train_lof,
     predict_lof,
 )
-
+from loglens.incidents.incident_grouper import group_incidents
+from loglens.explainability.explainer import explain_anomalies
 
 def load_and_parse_logs(file_path: str) -> pd.DataFrame:
     """Load a server log file and return valid parsed records."""
@@ -143,7 +144,15 @@ def run_pipeline(file_path: str) -> dict:
         lof_scaler,
         test_features,
     )
+    isolation_incidents=group_incidents(isolation_results)
+    lof_incidents=group_incidents(lof_results)
+    isolation_explanations = explain_anomalies(
+    train_features, isolation_results
+    )
 
+    lof_explanations = explain_anomalies(
+    train_features, lof_results
+  )
     # Step 7: Return data and anomaly detection results.
     return {
         "train_logs": train_logs,
@@ -152,4 +161,8 @@ def run_pipeline(file_path: str) -> dict:
         "test_features": test_features,
         "isolation_results": isolation_results,
         "lof_results": lof_results,
+        "isolation_incidents": isolation_incidents,
+        "lof_incidents": lof_incidents,
+        "isolation_explanations": isolation_explanations,
+        "lof_explanations": lof_explanations,
     }
