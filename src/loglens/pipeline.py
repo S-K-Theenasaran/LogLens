@@ -2,17 +2,16 @@
 import pandas as pd
 
 from loglens.ingest.parser import parse_log_file
+from loglens.ingest.hdfs_parser import parse_hdfs_file
 from loglens.parsing.template_miner import (
     fit_template_miner,
     transform_log_templates,
 )
 from loglens.features.window_features import build_window_features
-
 from loglens.models.isolation_forest import (
     train_isolation_forest,
     predict_anomalies,
 )
-
 from loglens.models.local_outlier_factor import (
     train_lof,
     predict_lof,
@@ -20,10 +19,14 @@ from loglens.models.local_outlier_factor import (
 from loglens.incidents.incident_grouper import group_incidents
 from loglens.explainability.explainer import explain_anomalies
 
+
 def load_and_parse_logs(file_path: str) -> pd.DataFrame:
     """Load a server log file and return valid parsed records."""
 
-    parsed_logs, failed_logs = parse_log_file(file_path)
+    if "HDFS" in str(file_path).upper():
+        parsed_logs, failed_logs = parse_hdfs_file(file_path)
+    else:
+        parsed_logs, failed_logs = parse_log_file(file_path)
 
     if parsed_logs.empty:
         raise ValueError("No valid log entries found in the file.")
@@ -75,7 +78,7 @@ def split_logs_by_time(
 def run_pipeline(file_path: str) -> dict:
     """Run the LogLens anomaly detection pipeline."""
 
-    # Step 1: Load and chronologically split the logs.
+    # Step 1: Load and split logs chronologically.
     logs = load_and_parse_logs(file_path)
 
     train_logs, test_logs = split_logs_by_time(
@@ -90,7 +93,7 @@ def run_pipeline(file_path: str) -> dict:
     train_logs = transform_log_templates(train_logs, miner)
     test_logs = transform_log_templates(test_logs, miner)
 
-    # Step 3: Build consistent training and testing features.
+    # Step 3: Build consistent features.
     template_ids = sorted(
         cluster.cluster_id
         for cluster in miner.drain.clusters
@@ -114,13 +117,12 @@ def run_pipeline(file_path: str) -> dict:
     if train_features.empty or test_features.empty:
         raise ValueError("Training or testing features are empty.")
 
-    # Step 4: Ensure enough training windows for both models.
     if len(train_features) < 3:
         raise ValueError(
             "At least three training windows are required for LOF."
         )
 
-    # Step 5: Train and predict with Isolation Forest.
+    # Step 4: Isolation Forest.
     isolation_model = train_isolation_forest(
         train_features,
         contamination=0.05,
@@ -132,7 +134,7 @@ def run_pipeline(file_path: str) -> dict:
         test_features,
     )
 
-    # Step 6: Train and predict with LOF.
+    # Step 5: Local Outlier Factor.
     lof_model, lof_scaler = train_lof(
         train_features,
         n_neighbors=20,
@@ -144,16 +146,23 @@ def run_pipeline(file_path: str) -> dict:
         lof_scaler,
         test_features,
     )
-    isolation_incidents=group_incidents(isolation_results)
-    lof_incidents=group_incidents(lof_results)
+
+    # Step 6: Incident grouping.
+    isolation_incidents = group_incidents(isolation_results)
+    lof_incidents = group_incidents(lof_results)
+
+    # Step 7: Explain detected anomalies.
     isolation_explanations = explain_anomalies(
-    train_features, isolation_results
+        train_features,
+        isolation_results,
     )
 
     lof_explanations = explain_anomalies(
-    train_features, lof_results
-  )
-    # Step 7: Return data and anomaly detection results.
+        train_features,
+        lof_results,
+    )
+
+    # Step 8: Return results.
     return {
         "train_logs": train_logs,
         "test_logs": test_logs,

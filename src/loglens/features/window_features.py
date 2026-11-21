@@ -7,7 +7,7 @@ def build_window_features(
     window_size: str = "5min",
     template_ids=None,
 ) -> pd.DataFrame:
-    """Count log templates within fixed time windows."""
+    """Count known and unseen log templates in time windows."""
 
     required = {"timestamp", "template_id"}
     missing = required - set(logs.columns)
@@ -23,32 +23,55 @@ def build_window_features(
         data["timestamp"], errors="raise"
     )
 
-    if data["template_id"].isna().any():
-        raise ValueError("Template IDs must not contain missing values.")
-
     if template_ids is None:
-        template_ids = sorted(data["template_id"].unique())
+        template_ids = sorted(
+            data["template_id"].dropna().unique()
+        )
 
-    # Count each template in each time window.
+    # Reserve -1 for unseen templates.
+    # Drain3 cluster IDs are positive integers.
+    unknown_id = -1
+
+    if unknown_id in template_ids:
+        raise ValueError("Unknown template ID conflicts with known IDs.")
+
+    data["template_id"] = data["template_id"].fillna(unknown_id)
+
     counts = (
         data.groupby(
-            [pd.Grouper(key="timestamp", freq=window_size), "template_id"]
+            [
+                pd.Grouper(key="timestamp", freq=window_size),
+                "template_id",
+            ]
         )
         .size()
         .unstack(fill_value=0)
     )
 
-    # Keep a consistent feature set across datasets.
-    counts = counts.reindex(columns=template_ids, fill_value=0)
-    
-    # Include time windows with no log events.
+    # Keep identical columns for training and testing.
+    feature_ids = list(template_ids) + [unknown_id]
+
+    counts = counts.reindex(
+        columns=feature_ids,
+        fill_value=0,
+    )
+
     all_windows = pd.date_range(
         start=data["timestamp"].min().floor(window_size),
         end=data["timestamp"].max().floor(window_size),
         freq=window_size,
     )
-    counts = counts.reindex(index=all_windows, fill_value=0)
+
+    counts = counts.reindex(
+        index=all_windows,
+        fill_value=0,
+    )
+
     counts.index.name = "timestamp"
-    counts.columns = [f"template_{tid}" for tid in counts.columns]
+    counts.columns = [
+        "unknown_template_count" if tid == unknown_id
+        else f"template_{tid}"
+        for tid in counts.columns
+    ]
 
     return counts.sort_index()
