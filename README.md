@@ -3,10 +3,10 @@
 
 **Explainable Machine Learning for Server Log Anomaly Detection**
 
-LogLens is a Python-based application for detecting unusual activity in server logs using machine learning.
+LogLens is a local Python application that analyzes server logs, groups similar messages using Drain3, and detects unusual activity using machine learning.
 
-**Project Status:** Working Draft — November 18, 2026  
-**Final Submission Deadline:** November 23, 2026
+**Status:** Final submission preparation — November 22, 2026  
+**Deadline:** November 23, 2026
 
 ## Technologies
 
@@ -15,60 +15,52 @@ LogLens is a Python-based application for detecting unusual activity in server l
 - Scikit-learn
 - Drain3
 - Streamlit
-- SQLite (database initialization implemented)
+- SQLite (database initialization)
 
 ## Implemented Features
 
-- Parse structured server logs and identify invalid entries.
-- Group similar log messages using Drain3.
-- Split training and testing logs chronologically.
-- Extract log-template counts in five-minute windows.
-- Detect anomalies using Isolation Forest.
-- Detect anomalies using Local Outlier Factor (LOF).
-- Display anomaly results in a local Streamlit dashboard.
-- Upload log files and compare model outputs.
+- Parse structured server logs and HDFS sample logs.
+- Identify invalid log entries.
+- Group similar messages using Drain3 template mining.
+- Split logs chronologically into training and testing sets.
+- Extract template-count features in five-minute windows.
+- Count previously unseen log templates.
+- Detect anomalies using Isolation Forest and LOF.
+- Group nearby anomalous windows into incidents.
+- Generate descriptive explanations for detected anomalies.
+- Display model results through a local Streamlit dashboard.
 
 ## Installation
 
 Clone the repository:
 
-```bash
+```powershell
 git clone https://github.com/S-K-Theenasaran/LogLens.git
 cd LogLens
 git checkout feature/pipeline-integration
-```
-
-Create and activate a virtual environment on Windows:
-
-```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+python -m pip install pandas numpy scikit-learn drain3 streamlit
 ```
 
-Install dependencies:
+## Running the Application
 
-```powershell
-pip install pandas numpy scikit-learn drain3 streamlit
-```
-
-## Running LogLens
-
-From the project root, run:
+From the project root:
 
 ```powershell
 $env:PYTHONPATH="src"
 python -m streamlit run app.py
 ```
 
-Open the local URL displayed in the terminal, usually:
+Open the local address displayed by Streamlit, usually:
 
 http://localhost:8501
 
-Upload a compatible server log file to analyze its activity.
+Upload a compatible server log file to run the anomaly detection pipeline.
 
-### Supported Log Format
+## Supported Log Formats
 
-The current parser expects structured log entries such as:
+### Structured logs
 
 ```text
 2026-11-18 10:00:00 INFO Server User 123 logged in
@@ -76,51 +68,95 @@ The current parser expects structured log entries such as:
 2026-11-18 10:10:00 ERROR Auth Invalid password
 ```
 
-The current pipeline requires at least three training time windows and a separate testing window.
+### HDFS logs
+
+The application also supports the HDFS log format used by the Loghub HDFS sample.
+
+The HDFS parser is selected for files whose paths contain `HDFS`.
+
+## Machine Learning Pipeline
+
+1. Parse log entries.
+2. Split logs chronologically into training and testing sets.
+3. Fit Drain3 templates using training logs.
+4. Transform logs into template-count features.
+5. Train Isolation Forest and Local Outlier Factor.
+6. Detect anomalous test windows.
+7. Group nearby anomalies into incidents.
+8. Generate descriptive anomaly explanations.
+
+Both models use the same training and testing feature sets.
+
+## Synthetic Dataset Evaluation
+
+The synthetic generator creates 50 five-minute windows with two deliberately injected high-volume anomalies.
+
+The first 40 windows are used for training and the final 10 for testing.
+
+### Results
+
+| Metric | Isolation Forest | LOF |
+|---|---:|---:|
+| Test windows | 10 | 10 |
+| True positives | 2 | 2 |
+| False positives | 0 | 1 |
+| False negatives | 0 | 0 |
+| True negatives | 8 | 7 |
+| Precision | 1.0000 | 0.6667 |
+| Recall | 1.0000 | 1.0000 |
+| F1 score | 1.0000 | 0.8000 |
+
+Isolation Forest detected both injected anomalies without false positives.
+
+LOF detected both anomalies but produced one false positive.
+
+These results apply only to the small synthetic dataset and do not establish real-world model accuracy.
+
+The evaluation results are stored in:
+
+`docs/synthetic_evaluation.csv`
+
+## Public HDFS Sample
+
+LogLens was tested using the public `HDFS_2k.log` sample.
+
+- Parsed log entries: 2,000
+- Failed log entries: 0
+- Training windows: 393
+- Testing windows: 61
+- Isolation Forest flagged windows: 7
+- LOF flagged windows: 2
+
+These are anomaly counts, not accuracy measurements.
+
+The sample was processed using time windows. The full HDFS benchmark requires block-level evaluation with ground-truth labels.
 
 ## Testing
 
-Generate synthetic server logs:
+Activate the virtual environment and run:
+
+```powershell
+$env:PYTHONPATH="src"
+python -m pytest -q
+```
+
+Additional standalone checks are available in the `tests` directory.
+
+Generate synthetic logs with:
 
 ```powershell
 python tests/generate_pipeline_logs.py
 ```
 
-The generator creates `data/pipeline_test.log`, containing normal activity and two deliberately injected activity spikes.
-
-Upload this file through the Streamlit dashboard.
-
-### Initial Synthetic Test Results
-
-| Model | Anomalous Windows |
-|---|---:|
-| Isolation Forest | 2 |
-| Local Outlier Factor | 3 |
-
-Both models flagged the two injected activity spikes.
-
-These results demonstrate that the prototype runs on synthetic data. They do not establish accuracy on real-world server logs.
-
 ## Current Limitations
 
-- Unseen log templates are not yet represented by a dedicated feature.
-- Model evaluation on public datasets is pending.
-- Incident grouping is not yet implemented.
-- Detailed anomaly explanations are not yet implemented.
-- The dashboard is an initial prototype.
-- SQLite persistence is not yet integrated into the analysis pipeline.
+- Public-dataset precision, recall and F1 evaluation remains incomplete.
+- HDFS is currently analyzed using time windows rather than block sessions.
+- The current pipeline does not train exclusively on verified normal-labeled public logs.
+- SQLite persistence is initialized but not fully integrated.
+- The Streamlit dashboard is a functional prototype.
+- Anomaly explanations describe feature deviations rather than proving root causes.
 
-## Planned Work Before Final Submission
-
-1. Evaluate both models using public log datasets.
-2. Calculate precision, recall and F1-score where ground-truth labels are available.
-3. Implement incident grouping.
-4. Improve anomaly explainability.
-5. Enhance the dashboard.
-6. Complete documentation, testing and demonstration materials.
-
-## Project Repository
+## Repository
 
 https://github.com/S-K-Theenasaran/LogLens
-
-**Current Working Branch:** `feature/pipeline-integration`
