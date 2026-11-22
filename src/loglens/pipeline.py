@@ -3,33 +3,60 @@ import pandas as pd
 
 from loglens.ingest.parser import parse_log_file
 from loglens.ingest.hdfs_parser import parse_hdfs_file
+from loglens.ingest.bgl_parser import parse_bgl_file
+
 from loglens.parsing.template_miner import (
     fit_template_miner,
     transform_log_templates,
 )
-from loglens.features.window_features import build_window_features
+
+from loglens.features.window_features import (
+    build_window_features,
+)
+
 from loglens.models.isolation_forest import (
     train_isolation_forest,
     predict_anomalies,
 )
+
 from loglens.models.local_outlier_factor import (
     train_lof,
     predict_lof,
 )
-from loglens.incidents.incident_grouper import group_incidents
-from loglens.explainability.explainer import explain_anomalies
 
+from loglens.incidents.incident_grouper import (
+    group_incidents,
+)
+
+from loglens.explainability.explainer import (
+    explain_anomalies,
+)
+from loglens.ingest.openstack_parser import parse_openstack_file
 
 def load_and_parse_logs(file_path: str) -> pd.DataFrame:
     """Load a server log file and return valid parsed records."""
 
-    if "HDFS" in str(file_path).upper():
-        parsed_logs, failed_logs = parse_hdfs_file(file_path)
+    file_name = str(file_path).upper()
+    
+    if "HDFS" in file_name:
+        parsed_logs, failed_logs = parse_hdfs_file(
+            file_path
+        )
+    elif "BGL" in file_name:
+        parsed_logs, failed_logs = parse_bgl_file(
+            file_path
+        )
+    elif "OPENSTACK" in file_name:
+     parsed_logs, failed_logs = parse_openstack_file(file_path)
     else:
-        parsed_logs, failed_logs = parse_log_file(file_path)
+        parsed_logs, failed_logs = parse_log_file(
+            file_path
+        )
 
     if parsed_logs.empty:
-        raise ValueError("No valid log entries found in the file.")
+        raise ValueError(
+            "No valid log entries found in the file."
+        )
 
     if not failed_logs.empty:
         print(
@@ -37,7 +64,11 @@ def load_and_parse_logs(file_path: str) -> pd.DataFrame:
             "could not be parsed."
         )
 
-    return parsed_logs.sort_values("timestamp").reset_index(drop=True)
+    return (
+        parsed_logs
+        .sort_values("timestamp")
+        .reset_index(drop=True)
+    )
 
 
 def split_logs_by_time(
@@ -48,29 +79,55 @@ def split_logs_by_time(
     """Split logs chronologically without sharing time windows."""
 
     if not 0 < train_ratio < 1:
-        raise ValueError("train_ratio must be between 0 and 1.")
+        raise ValueError(
+            "train_ratio must be between 0 and 1."
+        )
 
     if logs.empty:
         raise ValueError("Logs cannot be empty.")
 
-    sorted_logs = logs.sort_values("timestamp").reset_index(drop=True)
+    sorted_logs = (
+        logs
+        .sort_values("timestamp")
+        .reset_index(drop=True)
+    )
 
-    window_ids = sorted_logs["timestamp"].dt.floor(window_size)
-    unique_windows = window_ids.drop_duplicates().sort_values()
+    window_ids = sorted_logs["timestamp"].dt.floor(
+        window_size
+    )
+
+    unique_windows = (
+        window_ids
+        .drop_duplicates()
+        .sort_values()
+    )
 
     if len(unique_windows) < 2:
-        raise ValueError("At least two time windows are required.")
+        raise ValueError(
+            "At least two time windows are required."
+        )
 
-    split_index = int(len(unique_windows) * train_ratio)
+    split_index = int(
+        len(unique_windows) * train_ratio
+    )
+
     split_index = max(
         1,
-        min(split_index, len(unique_windows) - 1),
+        min(
+            split_index,
+            len(unique_windows) - 1,
+        ),
     )
 
     cutoff = unique_windows.iloc[split_index]
 
-    train_logs = sorted_logs[window_ids < cutoff].copy()
-    test_logs = sorted_logs[window_ids >= cutoff].copy()
+    train_logs = sorted_logs[
+        window_ids < cutoff
+    ].copy()
+
+    test_logs = sorted_logs[
+        window_ids >= cutoff
+    ].copy()
 
     return train_logs, test_logs
 
@@ -78,48 +135,70 @@ def split_logs_by_time(
 def run_pipeline(file_path: str) -> dict:
     """Run the LogLens anomaly detection pipeline."""
 
-    # Step 1: Load and split logs chronologically.
+    file_name = str(file_path).upper()
+
+    # Use smaller windows for the short OpenStack sample.
+    window_size = "1min" if "OPENSTACK" in file_name else "5min"
+
+    # Avoid generating empty windows for sparse BGL logs.
+    include_empty_windows = "BGL" not in file_name
+
+    # Step 1: Parse logs and split chronologically.
     logs = load_and_parse_logs(file_path)
 
     train_logs, test_logs = split_logs_by_time(
         logs,
         train_ratio=0.8,
-        window_size="5min",
+        window_size=window_size,
     )
 
-    # Step 2: Learn templates from training data only.
+    # Step 2: Learn templates using training data only.
     miner = fit_template_miner(train_logs)
 
-    train_logs = transform_log_templates(train_logs, miner)
-    test_logs = transform_log_templates(test_logs, miner)
+    train_logs = transform_log_templates(
+        train_logs,
+        miner,
+    )
 
-    # Step 3: Build consistent features.
+    test_logs = transform_log_templates(
+        test_logs,
+        miner,
+    )
+
+    # Step 3: Build aligned feature columns.
     template_ids = sorted(
         cluster.cluster_id
         for cluster in miner.drain.clusters
     )
 
     if not template_ids:
-        raise ValueError("No log templates were learned.")
+        raise ValueError(
+            "No log templates were learned."
+        )
 
     train_features = build_window_features(
         train_logs,
-        window_size="5min",
+        window_size=window_size,
         template_ids=template_ids,
+        include_empty_windows=include_empty_windows,
     )
 
     test_features = build_window_features(
         test_logs,
-        window_size="5min",
+        window_size=window_size,
         template_ids=template_ids,
+        include_empty_windows=include_empty_windows,
     )
 
     if train_features.empty or test_features.empty:
-        raise ValueError("Training or testing features are empty.")
+        raise ValueError(
+            "Training or testing features are empty."
+        )
 
     if len(train_features) < 3:
         raise ValueError(
-            "At least three training windows are required for LOF."
+            "At least three training windows "
+            "are required for LOF."
         )
 
     # Step 4: Isolation Forest.
@@ -147,9 +226,14 @@ def run_pipeline(file_path: str) -> dict:
         test_features,
     )
 
-    # Step 6: Incident grouping.
-    isolation_incidents = group_incidents(isolation_results)
-    lof_incidents = group_incidents(lof_results)
+    # Step 6: Group nearby anomalous windows.
+    isolation_incidents = group_incidents(
+        isolation_results
+    )
+
+    lof_incidents = group_incidents(
+        lof_results
+    )
 
     # Step 7: Explain detected anomalies.
     isolation_explanations = explain_anomalies(
@@ -162,7 +246,7 @@ def run_pipeline(file_path: str) -> dict:
         lof_results,
     )
 
-    # Step 8: Return results.
+    # Step 8: Return pipeline outputs.
     return {
         "train_logs": train_logs,
         "test_logs": test_logs,

@@ -6,29 +6,35 @@
 LogLens is a local Python application that analyzes server logs, groups similar messages using Drain3, and detects unusual activity using machine learning.
 
 **Status:** Final submission preparation — November 22, 2026  
-**Deadline:** November 23, 2026
+**Submission deadline:** November 23, 2026
 
 ## Technologies
 
-- Python
+- Python 3
 - Pandas and NumPy
 - Scikit-learn
 - Drain3
 - Streamlit
 - SQLite (database initialization)
+- Pytest
+
+The application runs machine learning models locally without external AI APIs.
 
 ## Implemented Features
 
-- Parse structured server logs and HDFS sample logs.
+- Parse structured server logs, HDFS, BGL, and OpenStack samples.
 - Identify invalid log entries.
 - Group similar messages using Drain3 template mining.
 - Split logs chronologically into training and testing sets.
-- Extract template-count features in five-minute windows.
+- Learn templates from training data only.
+- Extract log-template counts within time windows.
+- Extract severity-level counts (INFO, WARNING, ERROR, etc.).
 - Count previously unseen log templates.
-- Detect anomalies using Isolation Forest and LOF.
+- Detect anomalies using Isolation Forest and Local Outlier Factor (LOF).
 - Group nearby anomalous windows into incidents.
-- Generate descriptive explanations for detected anomalies.
-- Display model results through a local Streamlit dashboard.
+- Generate descriptive anomaly explanations.
+- Display results through a local Streamlit dashboard.
+- Compare model anomaly scores.
 
 ## Installation
 
@@ -37,10 +43,11 @@ Clone the repository:
 ```powershell
 git clone https://github.com/S-K-Theenasaran/LogLens.git
 cd LogLens
-git checkout feature/pipeline-integration
+
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install pandas numpy scikit-learn drain3 streamlit
+
+python -m pip install pandas numpy scikit-learn drain3 streamlit pytest
 ```
 
 ## Running the Application
@@ -48,19 +55,21 @@ python -m pip install pandas numpy scikit-learn drain3 streamlit
 From the project root:
 
 ```powershell
-$env:PYTHONPATH="src"
+$env:PYTHONPATH = "src"
 python -m streamlit run app.py
 ```
 
-Open the local address displayed by Streamlit, usually:
+Open:
 
 http://localhost:8501
 
-Upload a compatible server log file to run the anomaly detection pipeline.
+Upload a compatible `.log` or `.txt` file to run anomaly detection.
 
 ## Supported Log Formats
 
 ### Structured logs
+
+Example:
 
 ```text
 2026-11-18 10:00:00 INFO Server User 123 logged in
@@ -68,32 +77,40 @@ Upload a compatible server log file to run the anomaly detection pipeline.
 2026-11-18 10:10:00 ERROR Auth Invalid password
 ```
 
-### HDFS logs
+### Public dataset formats
 
-The application also supports the HDFS log format used by the Loghub HDFS sample.
+- HDFS (`HDFS_2k.log`)
+- BGL (`BGL_2k.log`)
+- OpenStack (`OpenStack_2k.log`)
 
-The HDFS parser is selected for files whose paths contain `HDFS`.
+The pipeline currently selects specialized parsers based on recognizable filenames.
+
+OpenStack uses one-minute windows, while HDFS and BGL use five-minute windows.
+
+BGL processing avoids generating empty windows across sparse timestamps.
 
 ## Machine Learning Pipeline
 
-1. Parse log entries.
-2. Split logs chronologically into training and testing sets.
-3. Fit Drain3 templates using training logs.
-4. Transform logs into template-count features.
-5. Train Isolation Forest and Local Outlier Factor.
-6. Detect anomalous test windows.
-7. Group nearby anomalies into incidents.
-8. Generate descriptive anomaly explanations.
+1. Parse server log entries.
+2. Split logs chronologically into training and testing datasets.
+3. Learn Drain3 templates using training data only.
+4. Apply learned templates to both datasets.
+5. Extract template-count and severity-count features.
+6. Train Isolation Forest and LOF.
+7. Identify anomalous testing windows.
+8. Group nearby anomalies into incidents.
+9. Generate descriptive anomaly explanations.
+10. Display results in Streamlit.
 
-Both models use the same training and testing feature sets.
+Both models use aligned training and testing feature sets.
 
 ## Synthetic Dataset Evaluation
 
-The synthetic generator creates 50 five-minute windows with two deliberately injected high-volume anomalies.
+An earlier synthetic evaluation used 50 five-minute windows with two deliberately injected high-volume anomalies.
 
-The first 40 windows are used for training and the final 10 for testing.
+The first 40 windows were used for training and the final 10 for testing.
 
-### Results
+### Recorded Results
 
 | Metric | Isolation Forest | LOF |
 |---|---:|---:|
@@ -106,56 +123,80 @@ The first 40 windows are used for training and the final 10 for testing.
 | Recall | 1.0000 | 1.0000 |
 | F1 score | 1.0000 | 0.8000 |
 
-Isolation Forest detected both injected anomalies without false positives.
+These are previously recorded synthetic evaluation results and have not been revalidated following the latest feature-engineering changes.
 
-LOF detected both anomalies but produced one false positive.
-
-These results apply only to the small synthetic dataset and do not establish real-world model accuracy.
-
-The evaluation results are stored in:
+The recorded results are stored in:
 
 `docs/synthetic_evaluation.csv`
 
-## Public HDFS Sample
+## Public Dataset Testing
 
-LogLens was tested using the public `HDFS_2k.log` sample.
+The complete pipeline was successfully executed on three public log samples on November 22, 2026.
 
-- Parsed log entries: 2,000
-- Failed log entries: 0
-- Training windows: 393
-- Testing windows: 61
-- Isolation Forest flagged windows: 7
-- LOF flagged windows: 2
+| Dataset | Training Windows | Testing Windows | Isolation Forest Anomalies | LOF Anomalies |
+|---|---:|---:|---:|---:|
+| HDFS | 393 | 61 | 8 | 1 |
+| BGL | 664 | 167 | 0 | 8 |
+| OpenStack | 12 | 3 | 0 | 0 |
 
-These are anomaly counts, not accuracy measurements.
+These are predicted anomaly counts, not accuracy measurements.
 
-The sample was processed using time windows. The full HDFS benchmark requires block-level evaluation with ground-truth labels.
+Public dataset precision, recall, and F1 scores have not been established using ground-truth labels.
+
+The OpenStack sample contains relatively few time windows and is primarily useful as a pipeline functionality check.
+
+The full HDFS benchmark requires block-level evaluation with ground-truth labels, rather than only time-window anomaly counts.
 
 ## Testing
 
 Activate the virtual environment and run:
 
 ```powershell
-$env:PYTHONPATH="src"
-python -m pytest -q
+$env:PYTHONPATH = "src"
+python -m pytest tests -v
 ```
 
-Additional standalone checks are available in the `tests` directory.
+Latest automated test results:
 
-Generate synthetic logs with:
+**7 passed — November 22, 2026**
 
-```powershell
-python tests/generate_pipeline_logs.py
-```
+Test coverage includes:
+
+- Anomaly explanation
+- Incident grouping
+- Template counts
+- Unknown templates
+- Severity counts
+- Empty time windows
+- Missing-column validation
+
+Additional standalone checks are available in the `tests` directory, including Isolation Forest, LOF, chronological splitting, and template mining.
+
+## Streamlit Dashboard
+
+The dashboard supports:
+
+- Log file uploading
+- Analyzed-window counts
+- Isolation Forest anomaly counts
+- LOF anomaly counts
+- Model result tables
+- Incident grouping
+- Anomaly explanations
+- Anomaly score visualization
+
+The dashboard was verified successfully using the HDFS sample.
 
 ## Current Limitations
 
-- Public-dataset precision, recall and F1 evaluation remains incomplete.
-- HDFS is currently analyzed using time windows rather than block sessions.
-- The current pipeline does not train exclusively on verified normal-labeled public logs.
-- SQLite persistence is initialized but not fully integrated.
-- The Streamlit dashboard is a functional prototype.
+- Public dataset precision, recall, and F1 evaluation remains incomplete.
+- HDFS is analyzed using time windows rather than block sessions.
+- Training data is split chronologically but is not restricted to verified normal-labeled public logs.
+- SQLite persistence is initialized but not fully integrated into the application.
+- Parser selection currently depends on recognizable filenames.
+- The dashboard is a functional local prototype.
 - Anomaly explanations describe feature deviations rather than proving root causes.
+- The synthetic evaluation has not been rerun following the latest feature-engineering changes.
 
 ## Repository
 

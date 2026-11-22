@@ -28,7 +28,12 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file is not None:
     with tempfile.TemporaryDirectory() as temp_dir:
-        file_path = Path(temp_dir) / "uploaded.log"
+
+        # Preserve the original filename so the pipeline
+        # can select the correct log parser.
+        safe_filename = Path(uploaded_file.name).name
+        file_path = Path(temp_dir) / safe_filename
+
         file_path.write_bytes(uploaded_file.getvalue())
 
         try:
@@ -40,6 +45,7 @@ if uploaded_file is not None:
 
             st.success("Log analysis completed!")
 
+            # Dashboard summary
             col1, col2, col3 = st.columns(3)
 
             col1.metric(
@@ -57,59 +63,71 @@ if uploaded_file is not None:
                 int(lof_results["is_anomaly"].sum()),
             )
 
+            # Isolation Forest results
             st.subheader("Isolation Forest Results")
+
             st.dataframe(
                 isolation_results,
                 use_container_width=True,
             )
 
+            # Local Outlier Factor results
             st.subheader("Local Outlier Factor Results")
+
             st.dataframe(
                 lof_results,
                 use_container_width=True,
             )
 
-           
-
+            # Incident grouping
             st.subheader("Detected Incidents")
 
             st.write("Isolation Forest Incidents")
+
             st.dataframe(
                 results["isolation_incidents"],
                 use_container_width=True,
             )
 
             st.write("Local Outlier Factor Incidents")
+
             st.dataframe(
                 results["lof_incidents"],
                 use_container_width=True,
             )
 
+            # Explainability
             st.subheader("Anomaly Explanations")
 
             st.write("Isolation Forest Explanations")
+
             st.dataframe(
                 results["isolation_explanations"],
                 use_container_width=True,
             )
 
             st.write("Local Outlier Factor Explanations")
+
             st.dataframe(
                 results["lof_explanations"],
                 use_container_width=True,
             )
 
             st.caption(
-                "Explanations show differences from training averages, "
-                "not the exact causes of model predictions."
+                "Explanations show differences from training "
+                "averages, not the exact causes of model predictions."
             )
-            
 
+            # Model comparison
             st.subheader("Anomaly Score Comparison")
 
             comparison = pd.DataFrame({
-                "Isolation Forest": isolation_results["anomaly_score"],
-                "LOF": lof_results["anomaly_score"],
+                "Isolation Forest": isolation_results[
+                    "anomaly_score"
+                ].to_numpy(),
+                "LOF": lof_results[
+                    "anomaly_score"
+                ].to_numpy(),
             })
 
             st.line_chart(comparison)

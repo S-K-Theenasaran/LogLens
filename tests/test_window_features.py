@@ -1,64 +1,81 @@
 
 import pandas as pd
+import pytest
 
 from loglens.features.window_features import build_window_features
 
 
-logs = pd.DataFrame({
-    "timestamp": [
-        "2026-11-15 10:00:00",
-        "2026-11-15 10:01:00",
-        "2026-11-15 10:04:00",
-        "2026-11-15 10:05:00",
-        "2026-11-15 10:07:00",
-        "2026-11-15 10:09:00",
-    ],
-    "template_id": [1, 1, 2, 1, 2, 2],
-})
-
-features = build_window_features(
-    logs,
-    window_size="5min",
-    template_ids=[1, 2, 3],
-)
-
-print(features.to_string())
-
-# Verify that both five-minute windows are present.
-assert len(features) == 2, "Expected two time windows"
-
-# Verify the exact template counts.
-assert features["template_1"].tolist() == [2, 1]
-assert features["template_2"].tolist() == [1, 2]
-
-# Template 3 is absent but must still have a column.
-assert features["template_3"].tolist() == [0, 0]
-
-# No missing values are allowed.
-assert not features.isna().any().any()
+@pytest.fixture
+def sample_logs():
+    return pd.DataFrame({
+        "timestamp": pd.to_datetime([
+            "2026-11-17 10:00:00",
+            "2026-11-17 10:01:00",
+            "2026-11-17 10:06:00",
+        ]),
+        "template_id": [1, 1, None],
+        "level": ["INFO", "WARNING", "ERROR"],
+    })
 
 
-# Test empty time windows.
-gap_logs = pd.DataFrame({
-    "timestamp": [
-        "2026-11-15 10:00:00",
-        "2026-11-15 10:15:00",
-    ],
-    "template_id": [1, 2],
-})
+def test_template_counts(sample_logs):
+    features = build_window_features(
+        sample_logs,
+        window_size="5min",
+        template_ids=[1, 2],
+    )
 
-gap_features = build_window_features(
-    gap_logs,
-    window_size="5min",
-    template_ids=[1, 2],
-)
+    assert len(features) == 2
+    assert features["template_1"].tolist() == [2, 0]
+    assert features["template_2"].tolist() == [0, 0]
 
-print("\nEmpty-window test:")
-print(gap_features.to_string())
 
-assert len(gap_features) == 4
-assert gap_features["template_1"].tolist() == [1, 0, 0, 0]
-assert gap_features["template_2"].tolist() == [0, 0, 0, 1]
+def test_unknown_templates(sample_logs):
+    features = build_window_features(
+        sample_logs,
+        template_ids=[1, 2],
+    )
 
-print("\nAll empty-window checks passed!")
-print("\nAll time-window feature checks passed!")
+    assert features["unknown_template_count"].tolist() == [0, 1]
+
+
+def test_severity_counts(sample_logs):
+    features = build_window_features(
+        sample_logs,
+        template_ids=[1, 2],
+    )
+
+    assert features["level_info_count"].tolist() == [1, 0]
+    assert features["level_warning_count"].tolist() == [1, 0]
+    assert features["level_error_count"].tolist() == [0, 1]
+
+
+def test_empty_windows():
+    logs = pd.DataFrame({
+        "timestamp": pd.to_datetime([
+            "2026-11-17 10:00:00",
+            "2026-11-17 10:10:00",
+        ]),
+        "template_id": [1, 1],
+    })
+
+    features = build_window_features(
+        logs,
+        window_size="5min",
+        template_ids=[1],
+        include_empty_windows=True,
+    )
+
+    assert len(features) == 3
+    assert features["template_1"].tolist() == [1, 0, 1]
+
+
+def test_missing_columns():
+    logs = pd.DataFrame({
+        "timestamp": pd.to_datetime([
+            "2026-11-17 10:00:00",
+        ])
+    })
+
+    with pytest.raises(ValueError):
+        build_window_features(logs)
